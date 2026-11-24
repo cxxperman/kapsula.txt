@@ -108,9 +108,9 @@ namespace Kapsula
 
             // Чем Kapsula делится с остальными приложениями dev.txt. Выключено — соответствующие состояния уходят как null.
             // Один переключатель на оба ключа, пока они совпадают; разошлись — два прежних, чтобы было видно как есть (Merged.ShareShown)
-            Add("Связь с другими приложениями", "share", "Делиться с приложениями dev.txt", "Трек, погода и сегодняшние события — только название и время; непрочитанное в Discord и Steam — только числа. Дальше этого компьютера не уходит", delegate { return ShareOn && ShareUnreadOn; }, delegate(bool v) { island.SetFlag("hubShare", v); island.SetFlag("hubUnread", v); });
+            Add("Связь с другими приложениями", "share", "Делиться с приложениями dev.txt", "Трек с обложкой и текстом песни, погода и сегодняшние события — только название и время; непрочитанное в Discord и Steam — только числа. Дальше этого компьютера не уходит", delegate { return ShareOn && ShareUnreadOn; }, delegate(bool v) { island.SetFlag("hubShare", v); island.SetFlag("hubUnread", v); });
             When(delegate { return Merged.ShareShown("share", ShareOn, ShareUnreadOn); });
-            Add("Связь с другими приложениями", "hubShare", "Показывать музыку, погоду и события другим приложениям dev.txt", "Трек, который сейчас играет, погода и сегодняшние события календаря — только название и время. Дальше этого компьютера не уходит", delegate { return ShareOn; });
+            Add("Связь с другими приложениями", "hubShare", "Показывать музыку, погоду и события другим приложениям dev.txt", "Трек, который сейчас играет, с обложкой и текстом песни, погода и сегодняшние события календаря — только название и время. Дальше этого компьютера не уходит", delegate { return ShareOn; });
             When(delegate { return Merged.ShareShown("hubShare", ShareOn, ShareUnreadOn); });
             Add("Связь с другими приложениями", "hubUnread", "Показывать счётчик непрочитанного", "Сколько сообщений из Discord и Steam вы ещё не видели — только числа, без текста", delegate { return ShareUnreadOn; });
             When(delegate { return Merged.ShareShown("hubUnread", ShareOn, ShareUnreadOn); });
@@ -314,7 +314,7 @@ namespace Kapsula
         }
 
         // ------------------------------------------------------------------ чем Kapsula делится с другими приложениями
-        // Состояния kapsula.media, kapsula.weather, kapsula.calendar, kapsula.unread и kapsula.system. Каждое — всегда целиком,
+        // Состояния kapsula.media, kapsula.lyrics, kapsula.weather, kapsula.calendar, kapsula.unread и kapsula.system. Каждое — всегда целиком,
         // уходит только когда изменилось, а когда показывать нечего (или показывать запретили) — null.
 
         public static bool On { get { return link != null; } }
@@ -561,11 +561,122 @@ namespace Kapsula
             link.State(topic, data);
         }
 
-        // Трек, который показывает остров. Нет трека или делиться запретили — null
-        public static Dictionary<string, object> MediaState(bool share, bool has, bool playing, string title, string artist, string app)
+        // Трек, который показывает остров. Нет трека или делиться запретили — null (и ни обложки, ни времени).
+        // cover — маленькая обложка data-URI (CoverDataUri); нет её — поля нет. Плеер не знает длину трека (duration <= 0) —
+        // нет duration, position и positionAt. position — секунды на момент positionAt (миллисекунды с 1970 года, UTC):
+        // пока играет, получатель досчитывает ход сам — position + (сейчас − positionAt)
+        public static Dictionary<string, object> MediaState(bool share, bool has, bool playing, string title, string artist, string app,
+            string cover, double duration, double position, long positionAt)
         {
             if (!share || !has) return null;
-            return HubLink.Msg("playing", playing, "title", title ?? "", "artist", artist ?? "", "app", app ?? "");
+            var d = HubLink.Msg("playing", playing, "title", title ?? "", "artist", artist ?? "", "app", app ?? "");
+            if (!string.IsNullOrEmpty(cover)) d["cover"] = cover;
+            if (duration > 0)
+            {
+                d["duration"] = Math.Round(duration, 1);
+                d["position"] = Math.Round(Math.Max(0, Math.Min(position, duration)), 1);
+                d["positionAt"] = positionAt;
+            }
+            return d;
+        }
+
+        // Текст песни, который показывает остров (kapsula.lyrics). null — делиться запретили, тексты выключены, текста нет
+        // (ещё ищется или не нашёлся). title и artist — ровно те, что в kapsula.media: по ним получатель сверяет, что текст
+        // от того же трека. t — начало строки в секундах с учётом сдвига пользователя (t = T − offset), до сотых; свои 0,3 с
+        // остров прибавляет только ради анимации — их здесь нет. synced — всегда true: остров берёт только синхронные тексты.
+        // Собранный JSON не больше LyricsMaxBytes (UTF-8): не влез — строки с конца отбрасываются
+        public const int LyricsMaxBytes = 48 * 1024;
+        public static Dictionary<string, object> LyricsState(bool share, bool on, bool has, string title, string artist, List<LyricLine> lines, double offset)
+        {
+            if (!share || !on || !has || lines == null) return null;
+            var js = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var enc = System.Text.Encoding.UTF8;
+            var list = new List<object>();
+            var d = HubLink.Msg("title", title ?? "", "artist", artist ?? "", "synced", true, "lines", list);
+            int size = enc.GetByteCount(js.Serialize(d));   // с пустым списком; каждая строка добавит себя и запятую
+            foreach (var l in lines)
+            {
+                if (l == null) continue;
+                double t = Math.Round(l.T - offset, 2);
+                if (t == 0) t = 0;   // без «-0»
+                var line = HubLink.Msg("t", t, "text", string.IsNullOrEmpty(l.Text) ? "♪" : l.Text);
+                int add = enc.GetByteCount(js.Serialize(line)) + (list.Count > 0 ? 1 : 0);
+                if (size + add > LyricsMaxBytes) break;
+                size += add;
+                list.Add(line);
+            }
+            return d;
+        }
+
+        // Миллисекунды с 1970 года (UTC) — так время понимает получатель на любом языке
+        public static long UnixMs(DateTime utc)
+        {
+            return (long)Math.Round((utc.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds);
+        }
+
+        // Нужен ли новый якорь хода песни (position, positionAt). Пока якорь прежний, сообщение kapsula.media не меняется —
+        // а оно немаленькое, в нём обложка. Новый якорь — когда: якоря ещё нет (wasKey == null); сменился трек; изменилось
+        // «играет / пауза»; изменилась длина (больше чем на 0,5 с); или настоящая позиция pos разошлась больше чем на 1,5 с
+        // с той, что получатель досчитает по прежнему якорю (перемотка). Плееры сообщают время раз в несколько секунд и
+        // с дрожанием до секунды — это якорь не трогает. На паузе позиция стоит: досчитанная — ровно wasPos.
+        public const double AnchorDrift = 1.5;
+        public static bool NewAnchor(string wasKey, bool wasPlaying, double wasDur, double wasPos, DateTime wasAt,
+            string key, bool playing, double dur, double pos, DateTime now)
+        {
+            if (wasKey == null || key != wasKey) return true;
+            if (playing != wasPlaying) return true;
+            if (Math.Abs(dur - wasDur) > 0.5) return true;
+            double expected = wasPos;
+            if (wasPlaying) expected += (now - wasAt).TotalSeconds;
+            if (dur > 0 && expected > dur) expected = dur;   // у конца трека полоса стоит и у острова (MediaInfo.Now), и у получателя
+            return Math.Abs(pos - expected) > AnchorDrift;
+        }
+
+        // Обложка для других приложений: вписана в 256×256 без искажения пропорций (её показывают и строкой, и крупной
+        // карточкой), JPEG на белом фоне (у JPEG нет прозрачности), data-URI — обычно 10–20 КБ. Качество 80; не влезла
+        // в 32 КБ — ниже. Битая картинка или не влезла и так — null: тогда обложки в состоянии нет вовсе.
+        // Средствами WPF, без окна — можно звать и не из потока окна.
+        public const int CoverSide = 256, CoverMaxChars = 32 * 1024;
+        public static string CoverDataUri(byte[] img)
+        {
+            if (img == null || img.Length == 0) return null;
+            try
+            {
+                System.Windows.Media.Imaging.BitmapSource src;
+                using (var ms = new System.IO.MemoryStream(img))
+                    src = System.Windows.Media.Imaging.BitmapDecoder.Create(ms, System.Windows.Media.Imaging.BitmapCreateOptions.None, System.Windows.Media.Imaging.BitmapCacheOption.OnLoad).Frames[0];
+                int w = src.PixelWidth, h = src.PixelHeight;
+                if (w <= 0 || h <= 0) return null;
+                double k = Math.Min(1.0, (double)CoverSide / Math.Max(w, h));
+                if (k < 1) src = new System.Windows.Media.Imaging.TransformedBitmap(src, new System.Windows.Media.ScaleTransform(k, k));
+                // прозрачное — на белый, как при сохранении в JPG на полке (ShelfActions.OnWhite), но без окна: попиксельно
+                var bgra = new System.Windows.Media.Imaging.FormatConvertedBitmap(src, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+                int sw = bgra.PixelWidth, sh = bgra.PixelHeight;
+                var px = new byte[sw * 4 * sh];
+                bgra.CopyPixels(px, sw * 4, 0);
+                var rgb = new byte[sw * 3 * sh];
+                for (int i = 0, n = sw * sh; i < n; i++)
+                {
+                    int a = px[i * 4 + 3];
+                    for (int c = 0; c < 3; c++) rgb[i * 3 + c] = (byte)((px[i * 4 + c] * a + 255 * (255 - a) + 127) / 255);
+                }
+                var flat = System.Windows.Media.Imaging.BitmapSource.Create(sw, sh, 96, 96, System.Windows.Media.PixelFormats.Bgr24, null, rgb, sw * 3);
+                var frame = System.Windows.Media.Imaging.BitmapFrame.Create(flat);
+                // не влезла — хуже качество, а не меньше размер: получатель показывает обложку и крупно
+                foreach (int quality in new int[] { 80, 65, 50, 35 })
+                {
+                    var enc = new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = quality };
+                    enc.Frames.Add(frame);
+                    using (var o = new System.IO.MemoryStream())
+                    {
+                        enc.Save(o);
+                        string uri = "data:image/jpeg;base64," + Convert.ToBase64String(o.ToArray());
+                        if (uri.Length <= CoverMaxChars) return uri;
+                    }
+                }
+                return null;
+            }
+            catch { return null; }
         }
 
         // Значок погоды для других приложений — по тем же кодам (WMO, как у Open-Meteo), по которым остров выбирает свой:
@@ -889,15 +1000,83 @@ namespace Kapsula
         {
             if (!CoreHub.On) return;
             HubShareMedia();
+            HubShareLyrics();
             HubShareWeather();
             HubShareCalendar();
             HubShareUnread();
         }
 
+        // Якорь хода песни, который видят другие приложения (CoreHub.NewAnchor); hubAnchorKey == null — якоря нет
+        string hubAnchorKey; bool hubAnchorPlaying; double hubAnchorDur, hubAnchorPos; DateTime hubAnchorAt;
+
         void HubShareMedia()
         {
             if (!CoreHub.On) return;
-            CoreHub.Share("kapsula.media", CoreHub.MediaState(CoreHub.ShareOn, media.Has, media.Playing, media.Title, media.Artist, media.Has ? MediaWatcher.DisplayName(media.Source) : ""));
+            if (!CoreHub.ShareOn || !media.Has)
+            {
+                // делиться запретили или трека нет — null; обложку не готовим, время не считаем
+                hubAnchorKey = null;
+                CoreHub.Share("kapsula.media", CoreHub.MediaState(CoreHub.ShareOn, media.Has, false, null, null, null, null, 0, 0, 0));
+                return;
+            }
+            string cover;
+            if (!HubCover(out cover)) return;   // обложка ещё готовится — состояние уйдёт целиком, когда она будет готова
+            double dur = media.Dur > 0 ? Math.Round(media.Dur, 1) : 0;
+            if (dur > 0)
+            {
+                DateTime now = DateTime.UtcNow;
+                double pos = media.Now();
+                string key = media.Source + "|" + media.Title + "|" + media.Artist;
+                if (CoreHub.NewAnchor(hubAnchorKey, hubAnchorPlaying, hubAnchorDur, hubAnchorPos, hubAnchorAt, key, media.Playing, dur, pos, now))
+                {
+                    hubAnchorKey = key; hubAnchorPlaying = media.Playing; hubAnchorDur = dur; hubAnchorPos = pos; hubAnchorAt = now;
+                }
+            }
+            else hubAnchorKey = null;
+            CoreHub.Share("kapsula.media", CoreHub.MediaState(true, true, media.Playing, media.Title, media.Artist, MediaWatcher.DisplayName(media.Source),
+                cover, dur, hubAnchorPos, CoreHub.UnixMs(hubAnchorAt)));
+        }
+
+        // Текст песни для других приложений. Собранное состояние запоминается по самому списку lyrics (новый текст — новый
+        // список), сдвигу и названию с исполнителем: пока они те же, заново не собирается и не сверяется — в нём сотни строк,
+        // а HubShareAll зовёт это раз в пару секунд. Любой null сбрасывает запомненное — следующий текст уйдёт заново
+        List<LyricLine> hubLyricsOf; double hubLyricsOffset; string hubLyricsTitle, hubLyricsArtist;
+        public void HubShareLyrics()
+        {
+            if (!CoreHub.On) return;
+            // текст — того трека, что сейчас в kapsula.media (lyricsKey — для какого трека он искался)
+            bool has = media.Has && lyrics != null && !lyricsPending && lyricsKey == media.Title + "|" + media.Artist;
+            if (!CoreHub.ShareOn || !LyricsOn() || !has)
+            {
+                hubLyricsOf = null;
+                CoreHub.Share("kapsula.lyrics", null);
+                return;
+            }
+            string title = media.Title ?? "", artist = media.Artist ?? "";
+            if (ReferenceEquals(lyrics, hubLyricsOf) && LyricOffset == hubLyricsOffset && title == hubLyricsTitle && artist == hubLyricsArtist) return;
+            hubLyricsOf = lyrics; hubLyricsOffset = LyricOffset; hubLyricsTitle = title; hubLyricsArtist = artist;
+            CoreHub.Share("kapsula.lyrics", CoreHub.LyricsState(true, true, true, title, artist, lyrics, LyricOffset));
+        }
+
+        // Маленькая обложка для хаба. Запоминается по самому массиву media.Cover: пока обложка та же, MediaWatcher отдаёт
+        // прежний массив — и перекодировать нечего. Новая готовится в фоне; false — ещё не готова (ответ придёт сам, HubShareMedia)
+        byte[] hubCoverOf; string hubCoverUri; bool hubCoverBusy;
+        bool HubCover(out string uri)
+        {
+            uri = null;
+            byte[] c = media.Cover;
+            if (c == null) return true;
+            if (ReferenceEquals(c, hubCoverOf)) { uri = hubCoverUri; return true; }
+            if (!hubCoverBusy)
+            {
+                hubCoverBusy = true;
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    string u = CoreHub.CoverDataUri(c);
+                    Dispatcher.BeginInvoke(new Action(delegate { hubCoverBusy = false; hubCoverOf = c; hubCoverUri = u; HubShareMedia(); }));
+                });
+            }
+            return false;
         }
 
         void HubShareWeather()

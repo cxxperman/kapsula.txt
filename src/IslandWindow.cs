@@ -2396,6 +2396,7 @@ namespace Kapsula
             var tm = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
             tm.Tick += delegate { tm.Stop(); if (seq == lyricsHoldSeq && lyricsPending) SetLyrics(null); };
             tm.Start();
+            HubShareLyrics();   // прежний текст другим приложениям больше не показываем (CoreHub.cs)
         }
 
         static bool LyricsOn() { return Store.Get("lyrics") != "off"; }
@@ -2428,6 +2429,7 @@ namespace Kapsula
                 FadeTo(miniLyrics.Root, 1, 320, null); FadeTo(homeLyrics.Root, 1, 320, null); FadeTo(stageLyrics.Root, 1, 320, null);
             }
             if (state == 1 && (resized || !wasPending)) SetTargets();
+            HubShareLyrics();   // текст нашёлся, пропал или тексты выключили — другие приложения узнают сразу (CoreHub.cs)
         }
 
         void FetchLyrics(string key, string title, string artist, double dur)
@@ -8797,6 +8799,7 @@ namespace Kapsula
         {
             LyricOffset = v;
             Store.Set("lyricOffset", v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+            HubShareLyrics();   // сдвиг уже учтён во времени строк kapsula.lyrics — уходят заново
         }
 
         void OnSourceInitialized(object sender, EventArgs e)

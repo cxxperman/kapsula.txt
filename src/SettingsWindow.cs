@@ -1989,11 +1989,11 @@ namespace Kapsula
             bool share = CoreHub.ShareOn, unread = CoreHub.ShareUnreadOn;
             if (InCore("share")) sp.Children.Add(CoreLine(CoreFamily, "Чем kapsula.txt делится с другими приложениями dev.txt: музыка, погода, события и счётчик непрочитанного — на странице «Общие».", "general", "делиться с приложениями dev.txt показывать музыку погоду и события счётчик непрочитанного связь"));
             else if (Merged.ShareShown("share", share, unread))
-                sp.Children.Add(Words(Row("Делиться с приложениями dev.txt", "Через core.txt остальные приложения dev.txt узнают, какой трек сейчас играет, какая погода и что сегодня в календаре (только название и время события), и сколько сообщений из Discord и Steam вы ещё не открывали (только числа). Дальше этого компьютера ничего не уходит.",
+                sp.Children.Add(Words(Row("Делиться с приложениями dev.txt", "Через core.txt остальные приложения dev.txt узнают, какой трек сейчас играет (с обложкой и текстом песни), какая погода и что сегодня в календаре (только название и время события), и сколько сообщений из Discord и Steam вы ещё не открывали (только числа). Дальше этого компьютера ничего не уходит.",
                     Toggle(share, delegate(bool v) { island.SetFlag("hubShare", v); island.SetFlag("hubUnread", v); }), false), "показывать музыку погоду и события счётчик непрочитанного"));
             else
             {
-                sp.Children.Add(Row("Показывать музыку, погоду и события другим приложениям dev.txt", "Через core.txt остальные приложения dev.txt узнают, какой трек сейчас играет, какая погода и что сегодня в календаре — только название и время события. Дальше этого компьютера ничего не уходит.", Toggle(share, delegate(bool v) { island.SetFlag("hubShare", v); }), false));
+                sp.Children.Add(Row("Показывать музыку, погоду и события другим приложениям dev.txt", "Через core.txt остальные приложения dev.txt узнают, какой трек сейчас играет (с обложкой и текстом песни), какая погода и что сегодня в календаре — только название и время события. Дальше этого компьютера ничего не уходит.", Toggle(share, delegate(bool v) { island.SetFlag("hubShare", v); }), false));
                 sp.Children.Add(Row("Показывать счётчик непрочитанного", "Другие приложения dev.txt видят, сколько сообщений из Discord и Steam вы ещё не открывали — только числа, без текста и имён.", Toggle(unread, delegate(bool v) { island.SetFlag("hubUnread", v); }), false));
             }
             sp.Children.Add(Row("Показывать остров на скриншотах", "По умолчанию он скрыт от снимков, записи экрана и трансляций.", Toggle(island.ShowInCapture, delegate(bool v) { island.SetFlag("showInCapture", v); }), false));

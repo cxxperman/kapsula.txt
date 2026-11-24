@@ -812,9 +812,91 @@ T 'хаб: погода — вместо прогноза ошибка' (HubJson
 
 # музыка
 $ms = $chT.GetMethod('MediaState')
-T 'хаб: музыка — трек' (HubJson $ms.Invoke($null, @($true, $true, $false, 'Ночной маршрут', 'Kapsula Demo', 'Spotify'))) '{"playing":false,"title":"Ночной маршрут","artist":"Kapsula Demo","app":"Spotify"}'
-T 'хаб: музыка — трека нет' (HubJson $ms.Invoke($null, @($true, $false, $false, '', '', ''))) 'null'
-T 'хаб: музыка — показывать запретили' (HubJson $ms.Invoke($null, @($false, $true, $true, 'А', 'Б', 'В'))) 'null'
+T 'хаб: музыка — трек' (HubJson $ms.Invoke($null, @($true, $true, $false, 'Ночной маршрут', 'Kapsula Demo', 'Spotify', $null, [double]0, [double]0, [long]0))) '{"playing":false,"title":"Ночной маршрут","artist":"Kapsula Demo","app":"Spotify"}'
+T 'хаб: музыка — трека нет' (HubJson $ms.Invoke($null, @($true, $false, $false, '', '', '', $null, [double]0, [double]0, [long]0))) 'null'
+T 'хаб: музыка — показывать запретили' (HubJson $ms.Invoke($null, @($false, $true, $true, 'А', 'Б', 'В', 'data:image/jpeg;base64,AAAA', [double]215.4, [double]37.2, [long]1795300000000))) 'null'
+# время: длина и позиция — до десятых, positionAt — целые миллисекунды; обложка — как есть
+$mst = $ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', 'data:image/jpeg;base64,AAAA', [double]215.43, [double]37.18, [long]1795300000000))
+T 'хаб: музыка — с длиной и обложкой' (HubJson $mst) '{"playing":true,"title":"А","artist":"Б","app":"В","cover":"data:image/jpeg;base64,AAAA","duration":215.4,"position":37.2,"positionAt":1795300000000}'
+T 'хаб: музыка — типы времени' ("$($mst['duration'].GetType().Name) $($mst['position'].GetType().Name) $($mst['positionAt'].GetType().Name)") 'Double Double Int64'
+T 'хаб: музыка — без длины времени нет' (HubJson $ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]-1, [double]5, [long]1795300000000))) '{"playing":true,"title":"А","artist":"Б","app":"В"}'
+T 'хаб: музыка — позиция не дальше длины' (HubJson $ms.Invoke($null, @($true, $true, $true, 'А', '', '', '', [double]200, [double]203.7, [long]1))) '{"playing":true,"title":"А","artist":"","app":"","duration":200,"position":200,"positionAt":1}'
+T 'хаб: миллисекунды с 1970 года' ($chT.GetMethod('UnixMs').Invoke($null, @([datetime]::SpecifyKind([datetime]'2026-11-24 10:00:00.250', 'Utc')))) '1795514400250'
+
+# маленькая обложка: вписана в 256×256 без искажений, JPEG; битая — null
+$cdu = $chT.GetMethod('CoverDataUri')
+function CoverPng($w, $h) {
+    $bmp = New-Object System.Drawing.Bitmap $w, $h
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.Clear([System.Drawing.Color]::FromArgb(200, 40, 90, 160)); $g.FillEllipse([System.Drawing.Brushes]::Orange, 0, 0, $w / 2, $h / 2); $g.Dispose()
+    $mem = New-Object System.IO.MemoryStream; $bmp.Save($mem, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+    return ,$mem.ToArray()
+}
+function CoverSize($uri) {
+    $bytes = [Convert]::FromBase64String($uri.Substring('data:image/jpeg;base64,'.Length))
+    $img = [System.Drawing.Image]::FromStream((New-Object System.IO.MemoryStream (,$bytes)))
+    $s = "$($img.Width)x$($img.Height) $($img.RawFormat.Guid -eq [System.Drawing.Imaging.ImageFormat]::Jpeg.Guid)"; $img.Dispose(); return $s
+}
+$cu1 = $cdu.Invoke($null, @(,(CoverPng 600 600)))
+T 'хаб: обложка — data-URI JPEG' ($cu1.StartsWith('data:image/jpeg;base64,')) $true
+T 'хаб: обложка — квадрат в 256' (CoverSize $cu1) '256x256 True'
+T 'хаб: обложка — влезает в 32 КБ' ($cu1.Length -le 32768) $true
+T 'хаб: обложка — широкая без искажений' (CoverSize ($cdu.Invoke($null, @(,(CoverPng 640 360))))) '256x144 True'
+T 'хаб: обложка — высокая без искажений' (CoverSize ($cdu.Invoke($null, @(,(CoverPng 301 997))))) '77x256 True'
+T 'хаб: обложка — маленькая не растягивается' (CoverSize ($cdu.Invoke($null, @(,(CoverPng 40 40))))) '40x40 True'
+T 'хаб: обложка — битая' ($null -eq $cdu.Invoke($null, @(,([byte[]](1..200))))) $true
+T 'хаб: обложка — пустая' ($null -eq $cdu.Invoke($null, @(,([byte[]]@())))) $true
+
+# якорь хода песни: новый — только когда получатель иначе показал бы неправду
+$na = $chT.GetMethod('NewAnchor')
+$t0 = [datetime]::SpecifyKind([datetime]'2026-11-24 10:00:00', 'Utc')
+function Anchor($wasKey, $wasPlaying, $wasPos, $key, $playing, $pos, $sec, $dur) {
+    if ($null -eq $dur) { $dur = 215.4 }
+    $na.Invoke($null, @($wasKey, [bool]$wasPlaying, [double]215.4, [double]$wasPos, $t0, $key, [bool]$playing, [double]$dur, [double]$pos, $t0.AddSeconds($sec)))
+}
+T 'якорь: первый раз' (Anchor $null $true 0 'a' $true 10 0) $true
+T 'якорь: играет ровно' (Anchor 'a' $true 30 'a' $true 40 10) $false
+T 'якорь: дрожание вперёд на секунду' (Anchor 'a' $true 30 'a' $true 41 10) $false
+T 'якорь: дрожание назад на секунду' (Anchor 'a' $true 30 'a' $true 39 10) $false
+T 'якорь: перемотка вперёд' (Anchor 'a' $true 30 'a' $true 70 10) $true
+T 'якорь: перемотка назад' (Anchor 'a' $true 30 'a' $true 5 10) $true
+T 'якорь: пауза' (Anchor 'a' $true 30 'a' $false 40 10) $true
+T 'якорь: на паузе стоит' (Anchor 'a' $false 40 'a' $false 40 60) $false
+T 'якорь: продолжили' (Anchor 'a' $false 40 'a' $true 40 60) $true
+T 'якорь: перемотка на паузе' (Anchor 'a' $false 40 'a' $false 120 60) $true
+T 'якорь: другой трек' (Anchor 'a' $true 30 'b' $true 40 10) $true
+T 'якорь: другая длина' (Anchor 'a' $true 30 'a' $true 40 10 180) $true
+T 'якорь: у конца трека полоса стоит' (Anchor 'a' $true 210 'a' $true 215.4 60) $false
+
+# текст песни: время строк — со сдвигом пользователя и до сотых, synced всегда true; нечего или нельзя показывать — null
+$lsm = $chT.GetMethod('LyricsState')
+$llT = $asm.GetType('Kapsula.LyricLine')
+function LyrList($pairs) {
+    $l = [Activator]::CreateInstance(([System.Collections.Generic.List`1]).MakeGenericType($llT))
+    for ($i = 0; $i -lt $pairs.Count; $i += 2) {
+        $x = [Activator]::CreateInstance($llT); $llT.GetField('T').SetValue($x, [double]$pairs[$i]); $llT.GetField('Text').SetValue($x, $pairs[$i + 1]); $l.Add($x)
+    }
+    return ,$l
+}
+function Lyr($share, $on, $has, $title, $artist, $lines, $off) { $lsm.Invoke($null, @([bool]$share, [bool]$on, [bool]$has, $title, $artist, $lines, [double]$off)) }
+$ll3 = LyrList @(12.3, 'Город гаснет за стеклом', 15.678, '♪', 20, 'Ночь длинна')
+T 'хаб: текст песни — три строки' (HubJson (Lyr $true $true $true 'Ночной маршрут' 'Kapsula Demo' $ll3 0)) '{"title":"Ночной маршрут","artist":"Kapsula Demo","synced":true,"lines":[{"t":12.3,"text":"Город гаснет за стеклом"},{"t":15.68,"text":"♪"},{"t":20,"text":"Ночь длинна"}]}'
+T 'хаб: текст песни — сдвиг вперёд' (HubJson (Lyr $true $true $true 'А' 'Б' $ll3 0.5)) '{"title":"А","artist":"Б","synced":true,"lines":[{"t":11.8,"text":"Город гаснет за стеклом"},{"t":15.18,"text":"♪"},{"t":19.5,"text":"Ночь длинна"}]}'
+T 'хаб: текст песни — сдвиг назад' (HubJson (Lyr $true $true $true 'А' '' (LyrList @(1.004, 'x', 2.996, '')) -1)) '{"title":"А","artist":"","synced":true,"lines":[{"t":2,"text":"x"},{"t":4,"text":"♪"}]}'
+T 'хаб: текст песни — без «-0»' (HubJson (Lyr $true $true $true 'А' 'Б' (LyrList @(0.5, 'x')) 0.5)) '{"title":"А","artist":"Б","synced":true,"lines":[{"t":0,"text":"x"}]}'
+T 'хаб: текст песни — делиться запретили' (HubJson (Lyr $false $true $true 'А' 'Б' $ll3 0)) 'null'
+T 'хаб: текст песни — тексты выключены' (HubJson (Lyr $true $false $true 'А' 'Б' $ll3 0)) 'null'
+T 'хаб: текст песни — текста нет' (HubJson (Lyr $true $true $false 'А' 'Б' $ll3 0)) 'null'
+T 'хаб: текст песни — без строк' (HubJson (Lyr $true $true $true 'А' 'Б' $null 0)) 'null'
+# не влезает в 48 КБ — строки отбрасываются с конца, начало и порядок те же
+$pairs = New-Object System.Collections.ArrayList
+for ($i = 0; $i -lt 3000; $i++) { [void]$pairs.Add($i * 1.5); [void]$pairs.Add("Очень длинная строка песни номер $i") }
+$lbig = Lyr $true $true $true 'А' 'Б' (LyrList $pairs.ToArray()) 0
+$lbigJson = HubJson $lbig
+$lbigN = $lbig['lines'].Count
+T 'хаб: текст песни — длинный влезает в 48 КБ' ([Text.Encoding]::UTF8.GetByteCount($lbigJson) -le 49152) $true
+T 'хаб: текст песни — длинный обрезан почти впритык' ([Text.Encoding]::UTF8.GetByteCount($lbigJson) -gt 49152 - 120) $true
+T 'хаб: текст песни — обрезан с конца' ("$($lbigN -gt 100 -and $lbigN -lt 3000) $($lbig['lines'][0]['text']) $($lbig['lines'][$lbigN - 1]['t'])") "True Очень длинная строка песни номер 0 $(($lbigN - 1) * 1.5)"
 
 # календарь: сегодняшние события, которые ещё не кончились, по порядку, не больше пяти
 $ceT = $asm.GetType('Kapsula.CalEvent')
