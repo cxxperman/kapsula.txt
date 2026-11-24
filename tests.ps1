@@ -111,7 +111,12 @@ $ocrArgs[0] = [byte[]]$ms.ToArray()
 $text = $asm.GetType('Kapsula.Ocr').GetMethod('Recognize').Invoke($null, $ocrArgs)
 $flat = ($text -replace '\s+', ' ')
 T 'OCR: русская строка' ($flat -match '48213') $true
-T 'OCR: слово «оплату»' ($flat -match 'оплату') $true
+# Кириллицу Windows читает, только если стоит русский пакет распознавания — на сервере сборки GitHub его нет.
+# Без пакета Kapsula честно берёт английское распознавание (Ocr.Recognize), и слово по-русски не прочитать
+$ruOcr = $false
+try { $ruOcr = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]::IsLanguageSupported([Windows.Globalization.Language, Windows.Foundation, ContentType = WindowsRuntime]::new('ru')) } catch { }
+if ($ruOcr) { T 'OCR: слово «оплату»' ($flat -match 'оплату') $true }
+else { Write-Host '      OCR: слово «оплату» — пропущено, в Windows нет русского распознавания' }
 T 'OCR: английская строка' ($flat -match 'Invoice total') $true
 
 # --- автообновление: разбор версий и выбор релиза из ответа GitHub
