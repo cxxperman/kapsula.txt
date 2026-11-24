@@ -1314,4 +1314,5 @@ foreach ($c in @(@('general', '--page general'), @('games', '--page games'), @($
 }
 T 'core.txt: строки «Настраивается в core.txt» — у каждой группы своя' (@($swT.GetField('CoreStartup').GetValue($null), $swT.GetField('CoreGames').GetValue($null), $swT.GetField('CoreFamily').GetValue($null)) | Sort-Object -Unique).Count 3
 "`nПройдено: $script:pass, не пройдено: $script:fail"
-if ($script:fail -gt 0) { exit 1 }
+# Код выхода — всегда явно: сборка релиза смотрит $LASTEXITCODE, а без exit он остаётся пустым и считается провалом
+if ($script:fail -gt 0) { exit 1 } else { exit 0 }
