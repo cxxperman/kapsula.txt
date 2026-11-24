@@ -24,6 +24,7 @@ namespace Kapsula
     {
         public bool Has, Playing;
         public string Title = "", Artist = "";
+        public string Album = "";           // альбом из сессии Windows; плеер не сообщил — пусто
         public string Source = "";          // программа-плеер, от которой взяты данные
         public string[] Sources = new string[0];   // все программы, которые сейчас что-то играют или держат на паузе
         public byte[] Cover;
@@ -214,6 +215,7 @@ namespace Kapsula
                             catch { }
                             string key = info.Title + "|" + info.Artist;
                             string album = p.AlbumTitle ?? "";
+                            info.Album = album.Trim();
                             int nowT = Environment.TickCount;
                             if (key != lastKey)
                             {

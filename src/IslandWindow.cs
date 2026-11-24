@@ -10193,7 +10193,9 @@ namespace Kapsula
                         catch { coverBrush = null; }
                     }
                     accentFromCover = coverBrush != null && ac != OwnAccent;   // общий цвет из core.txt цвет обложки не перекрывает
+                    coverAccent = accentFromCover ? (Color?)ac : null;   // тот же цвет — другим приложениям (kapsula.media, color)
                     UpdateAccent(ac);
+                    HubShareMedia();
                     SwapCover(mCover, coverBrush != null ? (Brush)coverBrush : Glass.Fill);
                     SwapCover(cCover, coverBrush != null ? (Brush)coverBrush : Glass.Fill);
                     SwapCover(nCover, coverBrush != null ? (Brush)coverBrush : Glass.Fill);

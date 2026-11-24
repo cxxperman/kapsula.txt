@@ -608,6 +608,19 @@ namespace Kapsula
             return d;
         }
 
+        // Ещё два необязательных поля kapsula.media: album — альбом из сессии Windows (получатель по нему отличает альбомную
+        // версию от сингла, когда ищет обложку сам); color — цвет, в который остров красит трек по обложке, "#rrggbb".
+        // Нет — поля нет. state == null (делиться нельзя или трека нет) — так и остаётся null
+        public static Dictionary<string, object> MediaMore(Dictionary<string, object> state, string album, string color)
+        {
+            if (state == null) return null;
+            if (!string.IsNullOrEmpty(album)) state["album"] = album;
+            if (!string.IsNullOrEmpty(color)) state["color"] = color;
+            return state;
+        }
+
+        public static string Hex(System.Windows.Media.Color c) { return "#" + c.R.ToString("x2") + c.G.ToString("x2") + c.B.ToString("x2"); }
+
         // Миллисекунды с 1970 года (UTC) — так время понимает получатель на любом языке
         public static long UnixMs(DateTime utc)
         {
@@ -787,6 +800,7 @@ namespace Kapsula
 
         System.Windows.Media.Color? sharedAccent;   // цвет подсветки из core.txt (hub.theme.accent); null — свой
         bool accentFromCover;                       // подсветка сейчас — в цвет обложки играющего трека
+        System.Windows.Media.Color? coverAccent;    // этот цвет обложки — для kapsula.media (color); null — подсветка не по обложке
 
         // Свой цвет подсветки острова: общий из core.txt или зелёный Kapsula. У трека с обложкой подсветка — в цвет обложки
         System.Windows.Media.Color OwnAccent { get { return sharedAccent ?? DefaultAccent; } }
@@ -803,7 +817,7 @@ namespace Kapsula
             if (Nullable.Equals(next, sharedAccent)) return;
             sharedAccent = next;
             if (glowTop == null || accentFromCover && media.Has && coverBrush != null) return;
-            if (accentFromCover) { accentFromCover = false; shownCover = null; }   // тот же трек вернётся — обложка и её цвет встанут заново
+            if (accentFromCover) { accentFromCover = false; coverAccent = null; shownCover = null; }   // тот же трек вернётся — обложка и её цвет встанут заново
             UpdateAccent(OwnAccent);
         }
 
@@ -1033,8 +1047,8 @@ namespace Kapsula
                 }
             }
             else hubAnchorKey = null;
-            CoreHub.Share("kapsula.media", CoreHub.MediaState(true, true, media.Playing, media.Title, media.Artist, MediaWatcher.DisplayName(media.Source),
-                cover, dur, hubAnchorPos, CoreHub.UnixMs(hubAnchorAt)));
+            CoreHub.Share("kapsula.media", CoreHub.MediaMore(CoreHub.MediaState(true, true, media.Playing, media.Title, media.Artist, MediaWatcher.DisplayName(media.Source),
+                cover, dur, hubAnchorPos, CoreHub.UnixMs(hubAnchorAt)), media.Album, coverAccent.HasValue ? CoreHub.Hex(coverAccent.Value) : null));
         }
 
         // Текст песни для других приложений. Собранное состояние запоминается по самому списку lyrics (новый текст — новый

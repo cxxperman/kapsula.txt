@@ -826,6 +826,12 @@ T 'хаб: музыка — с длиной и обложкой' (HubJson $mst) 
 T 'хаб: музыка — типы времени' ("$($mst['duration'].GetType().Name) $($mst['position'].GetType().Name) $($mst['positionAt'].GetType().Name)") 'Double Double Int64'
 T 'хаб: музыка — без длины времени нет' (HubJson $ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]-1, [double]5, [long]1795300000000))) '{"playing":true,"title":"А","artist":"Б","app":"В"}'
 T 'хаб: музыка — позиция не дальше длины' (HubJson $ms.Invoke($null, @($true, $true, $true, 'А', '', '', '', [double]200, [double]203.7, [long]1))) '{"playing":true,"title":"А","artist":"","app":"","duration":200,"position":200,"positionAt":1}'
+# альбом и цвет трека — необязательные; null так и остаётся null
+$mm = $chT.GetMethod('MediaMore')
+T 'хаб: музыка — альбом и цвет' (HubJson $mm.Invoke($null, @($ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]0, [double]0, [long]0)), 'Альбом', '#1a2b3c'))) '{"playing":true,"title":"А","artist":"Б","app":"В","album":"Альбом","color":"#1a2b3c"}'
+T 'хаб: музыка — без альбома и цвета' (HubJson $mm.Invoke($null, @($ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]0, [double]0, [long]0)), '', $null))) '{"playing":true,"title":"А","artist":"Б","app":"В"}'
+T 'хаб: музыка — альбом при запрете не уходит' (HubJson $mm.Invoke($null, @($null, 'Альбом', '#1a2b3c'))) 'null'
+T 'хаб: цвет трека — #rrggbb' ($chT.GetMethod('Hex').Invoke($null, @([System.Windows.Media.Color]::FromRgb(10, 171, 255)))) '#0aabff'
 T 'хаб: миллисекунды с 1970 года' ($chT.GetMethod('UnixMs').Invoke($null, @([datetime]::SpecifyKind([datetime]'2026-11-24 10:00:00.250', 'Utc')))) '1795514400250'
 
 # маленькая обложка: вписана в 256×256 без искажений, JPEG; битая — null
