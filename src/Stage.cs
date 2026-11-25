@@ -55,8 +55,10 @@ namespace Kapsula
             stageLyrics = new LyricView(StageW - 40, MH - 12 - 14 - 24 - 6, true, 0.26, Fg, 19, true);
             stageLyrics.Root.HorizontalAlignment = HorizontalAlignment.Left;
             Grid.SetRow(stageLyrics.Root, 1); stageHost.Children.Add(stageLyrics.Root);
-            stageProgress = new Bar(StageW - 40, 3, accent, 6);
+            stageProgress = new Bar(StageW - 40, 3, accent, 12);
             stageProgress.Root.VerticalAlignment = VerticalAlignment.Bottom;
+            stageProgress.Root.Margin = new Thickness(0, -3, 0, -3);   // за полосу можно взяться и перемотать; место в разметке — прежние 6 точек
+            SeekBar(stageProgress);
             Grid.SetRow(stageProgress.Root, 2); stageHost.Children.Add(stageProgress.Root);
             miniHost.Children.Add(stageHost);
             // кнопка «только текст» — в углу колонки текста обычного мини-плеера

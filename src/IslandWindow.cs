@@ -531,6 +531,30 @@ namespace Kapsula
             else if (holding && (key != holdKey || m.PosAt != holdRawAt && Math.Abs(m.Pos - holdPos) >= 3)) holding = false;
             if (holding) { m.Pos = holdPos; m.PosAt = DateTime.UtcNow; }
         }
+
+        // После перемотки плееры ещё секунду-две присылают прежнюю позицию. 2,5 с после перемотки отчёт, который
+        // расходится с показанным (а показано то, куда перемотали) больше чем на 3 с, полосу назад не откатывает
+        string seekKey; int seekAt; bool seekHold;
+        const int SeekHoldMs = 2500;
+        static string SeekKey(MediaInfo m) { return m.Source + "|" + m.Title + "|" + m.Artist; }
+        void HoldSeekPosition(MediaInfo m)
+        {
+            if (!seekHold) return;
+            if (unchecked(Environment.TickCount - seekAt) > SeekHoldMs || !m.Has || !media.Has || SeekKey(m) != seekKey || SeekKey(media) != seekKey) { seekHold = false; return; }
+            double shown = media.Now();
+            if (Math.Abs(m.Now() - shown) > 3) { m.Pos = shown; m.PosAt = DateTime.UtcNow; }
+        }
+
+        // Перемотка удалась (с острова или командой хаба): полоса сразу стоит там, куда перемотали, не дожидаясь отчёта плеера
+        void SeekDone(string key, double sec)
+        {
+            if (!media.Has || SeekKey(media) != key) return;   // пока плеер перематывал, трек сменился
+            if (media.Dur > 0 && sec > media.Dur) sec = media.Dur;
+            media.Pos = Math.Max(0, sec); media.PosAt = DateTime.UtcNow;
+            holding = false;
+            seekKey = key; seekAt = Environment.TickCount; seekHold = true;
+            RenderMedia();
+        }
         MediaWatcher watcher = new MediaWatcher();
         byte[] shownCover = new byte[0];   // не null: первый трек без обложки тоже проходит через SwapCover и получает ноту
         ImageBrush coverBrush;
@@ -594,7 +618,7 @@ namespace Kapsula
                 ClaudeAfter(60000, delegate { try { System.IO.File.WriteAllText(System.IO.Path.Combine(Store.Dir, "profile.txt"), Prof.Report()); } catch { } });
             }
 
-            watcher.Updated += delegate(MediaInfo m) { Dispatcher.BeginInvoke(new Action(delegate { if (Demo) return; HoldPausePosition(m); media = m; RenderMedia(); })); };
+            watcher.Updated += delegate(MediaInfo m) { Dispatcher.BeginInvoke(new Action(delegate { if (Demo) return; HoldSeekPosition(m); HoldPausePosition(m); media = m; RenderMedia(); })); };
             watcher.Preferred = Store.Get("player");
             watcher.Start();
             DiscordBridge.Notified += delegate(string t, string x, byte[] i) { Dispatcher.BeginInvoke(new Action(delegate { DiscordNotify(t, x, i); })); };
@@ -904,8 +928,10 @@ namespace Kapsula
             pr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });
             nPos = new TextBlock { Foreground = Dim, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
             nRem = new TextBlock { Foreground = Dim, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
-            nProgress = new Bar(MW - 36 - 76, 4, accent, 10);
+            nProgress = new Bar(MW - 36 - 76, 4, accent, 16);
             nProgress.Root.HorizontalAlignment = HorizontalAlignment.Center;
+            nProgress.Root.Margin = new Thickness(0, -3, 0, -3);   // попадать мышью легче, а место в разметке — прежние 10 точек
+            SeekBar(nProgress);
             pr.Children.Add(nPos);
             Grid.SetColumn(nProgress.Root, 1); pr.Children.Add(nProgress.Root);
             Grid.SetColumn(nRem, 2); pr.Children.Add(nRem);
@@ -3230,8 +3256,10 @@ namespace Kapsula
             progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
             mPos = new TextBlock { Foreground = Dim, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
             mDur = new TextBlock { Foreground = Dim, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
-            mProgress = new Bar(244, 4, accent, 10);
+            mProgress = new Bar(244, 4, accent, 16);
             mProgress.Root.HorizontalAlignment = HorizontalAlignment.Center;
+            mProgress.Root.Margin = new Thickness(0, -3, 0, -3);   // попадать мышью легче, а место в разметке — прежние 10 точек
+            SeekBar(mProgress);
             progressRow.Children.Add(mPos);
             Grid.SetColumn(mProgress.Root, 1); progressRow.Children.Add(mProgress.Root);
             Grid.SetColumn(mDur, 2); progressRow.Children.Add(mDur);
@@ -8915,7 +8943,7 @@ namespace Kapsula
             if (Demo)
             {
                 TestLyrics = true;   // не искать текст выдуманной песни в сети
-                media = new MediaInfo { Has = true, Playing = true, Title = "Ночной маршрут", Artist = "Kapsula Demo", Cover = DemoCover(), Pos = 47, Dur = 204, PosAt = DateTime.UtcNow };
+                media = new MediaInfo { Has = true, Playing = true, Title = "Ночной маршрут", Artist = "Kapsula Demo", Cover = DemoCover(), Pos = 47, Dur = 204, PosAt = DateTime.UtcNow, CanSeek = true };
                 RenderMedia();
                 LoadLauncher();
                 DemoSeed();   // буфер, погода — выдуманные
@@ -8925,7 +8953,7 @@ namespace Kapsula
                     int n = 0;
                     byte[] a = DemoCover(), b = DemoCoverFlipped();
                     var sw2 = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2500) };
-                    sw2.Tick += delegate { n++; media = new MediaInfo { Has = true, Playing = true, Title = n % 2 == 1 ? "Утренний перегон" : "Ночной маршрут", Artist = n % 2 == 1 ? "Другой исполнитель" : "Kapsula Demo", Cover = n % 2 == 1 ? b : a, Pos = 0, Dur = 204, PosAt = DateTime.UtcNow }; RenderMedia();
+                    sw2.Tick += delegate { n++; media = new MediaInfo { Has = true, Playing = true, Title = n % 2 == 1 ? "Утренний перегон" : "Ночной маршрут", Artist = n % 2 == 1 ? "Другой исполнитель" : "Kapsula Demo", Cover = n % 2 == 1 ? b : a, Pos = 0, Dur = 204, PosAt = DateTime.UtcNow, CanSeek = true }; RenderMedia();
                         // текст «находится» через 0,8 с, как из сети
                         int nn = n;
                         ClaudeAfter(300, delegate { if (n == nn) LyricsArrived(null); });
@@ -9679,7 +9707,7 @@ namespace Kapsula
                 bool inside = Math.Abs(x - cx) <= tw / 2 + 14 && y <= th + 20;
                 if ((pinned || EditingBoard() != null) && state == 2) { leaveAt = 0; return; }   // закреплённая панель и правка вкладки не закрываются сами
                 if (inside) holdOpenUntil = 0;   // курсор пришёл на остров — дальше обычные правила
-                if (inside || Typing() || volBar.Root.IsMouseCaptured || miniVolBar != null && miniVolBar.Root.IsMouseCaptured || holdOpenUntil != 0 && unchecked(Environment.TickCount - holdOpenUntil) < 0) { leaveAt = 0; return; }
+                if (inside || Typing() || volBar.Root.IsMouseCaptured || miniVolBar != null && miniVolBar.Root.IsMouseCaptured || SeekDragging() || holdOpenUntil != 0 && unchecked(Environment.TickCount - holdOpenUntil) < 0) { leaveAt = 0; return; }
                 if (leaveAt == 0) leaveAt = now;
                 else if (unchecked(now - leaveAt) >= 260) { leaveAt = 0; SetState(0); }
             }
@@ -10233,21 +10261,16 @@ namespace Kapsula
             {
                 bool hasTime = media.Dur > 1;
                 progressRow.Visibility = hasTime ? Visibility.Visible : Visibility.Hidden;
-                if (hasTime)
+                // полосу тянут или плеер ещё перематывает — показываем точку перемотки, а не ход трека
+                bool seekShown = SeekDragging() || seekWait && SeekKey(media) == seekWaitKey;
+                // часовое видео или подкаст: колонки времени шире, полоса короче — «−1:35:12» не обрезается (FitTimes в PaintProgress)
+                if (hasTime) PaintProgress(seekShown ? seekFrac * media.Dur : media.Now());
+                else
                 {
-                    double pos = media.Now();
-                    mProgress.Set(pos / media.Dur);
-                    mPos.Text = FmtSec(pos);
-                    mDur.Text = FmtSec(media.Dur);
-                    nProgress.Set(pos / media.Dur);
-                    if (stageProgress != null) stageProgress.Set(pos / media.Dur);
-                    nPos.Text = FmtSec(pos);
-                    nRem.Text = "−" + FmtSec(Math.Max(0, media.Dur - pos));
+                    nProgress.Set(0); if (stageProgress != null) stageProgress.Set(0); nPos.Text = ""; nRem.Text = "";
+                    FitTimes(mPos, mDur, mProgress, 36, 258 + 72);
+                    FitTimes(nPos, nRem, nProgress, 38, MW - 36);
                 }
-                else { nProgress.Set(0); if (stageProgress != null) stageProgress.Set(0); nPos.Text = ""; nRem.Text = ""; }
-                // часовое видео или подкаст: колонки времени шире, полоса короче — «−1:35:12» не обрезается
-                FitTimes(mPos, mDur, mProgress, 36, 258 + 72);
-                FitTimes(nPos, nRem, nProgress, 38, MW - 36);
             }
             // Выбранный режим запоминается: «только плеер» включается сам, как только у плеера находится свой звук.
             bool wantPlayer = Store.Get("volPlayer") == "1";
@@ -10308,6 +10331,89 @@ namespace Kapsula
             else { Audio.SetVolume(v); lastVol = v; }
             volBar.Set(v);
             volText.Text = Math.Round(v * 100) + "%";
+        }
+
+        // ---- перемотка за полосу хода трека (на «Главной», в мини-плеере и в «только тексте»). Пока тянут — полоса и время
+        // показывают точку под курсором; отпустили (или просто щёлкнули) — одна перемотка туда.
+        // Плеер не умеет перематывать — полоса как раньше: стрелка, нажатие ничего не делает
+        Bar seekBar;          // какую полосу тянут сейчас; null — никакую
+        double seekFrac;      // точка под курсором, доля трека
+
+        bool SeekOk() { return media.Has && media.CanSeek && media.Dur > 1; }
+        bool SeekDragging() { return seekBar != null && seekBar.Root.IsMouseCaptured; }
+
+        void SeekBar(Bar b)
+        {
+            b.Root.MouseEnter += delegate { b.Root.Cursor = SeekOk() ? Cursors.Hand : null; };
+            b.Root.MouseLeftButtonDown += delegate(object s, MouseButtonEventArgs e)
+            {
+                if (!SeekOk()) return;
+                e.Handled = true;   // нажатие не тащит остров и не раскрывает панель
+                seekBar = b;
+                b.Root.CaptureMouse();
+                SeekShow(b.ValueAt(e.GetPosition(b.Root)));
+            };
+            b.Root.MouseMove += delegate(object s, MouseEventArgs e)
+            {
+                if (seekBar == b && b.Root.IsMouseCaptured) SeekShow(b.ValueAt(e.GetPosition(b.Root)));
+                else b.Root.Cursor = SeekOk() ? Cursors.Hand : null;
+            };
+            b.Root.MouseLeftButtonUp += delegate(object s, MouseButtonEventArgs e)
+            {
+                if (seekBar != b) return;
+                e.Handled = true;
+                double f = seekFrac = b.ValueAt(e.GetPosition(b.Root));
+                seekBar = null;   // до ReleaseMouseCapture: иначе LostMouseCapture принял бы это за отмену
+                b.Root.ReleaseMouseCapture();
+                if (SeekOk()) SeekTo(f * media.Dur);
+                else RenderHomeLive();
+            };
+            // захват пропал посреди перетаскивания (Alt+Tab, окно UAC) — не перематываем, полоса возвращается к настоящей позиции
+            b.Root.LostMouseCapture += delegate { if (seekBar == b) { seekBar = null; RenderHomeLive(); } };
+        }
+
+        void SeekShow(double frac)
+        {
+            seekFrac = frac;
+            if (!media.Has || media.Dur <= 1) return;
+            PaintProgress(frac * media.Dur);
+        }
+
+        // Перемотка с острова: плеер ждём в фоне, по ответу полоса сразу встаёт на место (SeekDone); отказ — ничего,
+        // следующий отчёт плеера вернёт полосу туда, где трек на самом деле
+        void SeekTo(double sec)
+        {
+            if (!SeekOk()) return;
+            sec = Math.Max(0, Math.Min(media.Dur, sec));
+            string key = SeekKey(media);
+            if (Demo) { SeekDone(key, sec); return; }   // в демо трек выдуманный — настоящий плеер не трогаем
+            int n = ++seekN;
+            seekWait = true; seekWaitKey = key;   // пока плеер отвечает, полоса стоит там, где её отпустили
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                bool ok = watcher.Seek(sec);
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    if (n != seekN) return;   // за это время перемотали ещё раз — ответ устарел
+                    seekWait = false;
+                    if (ok) SeekDone(key, sec); else RenderHomeLive();
+                }));
+            });
+        }
+        int seekN; bool seekWait; string seekWaitKey;
+
+        // полосы и время в плеере на «Главной», в мини-плеере и в «только тексте» — для позиции pos, секунды
+        void PaintProgress(double pos)
+        {
+            mProgress.Set(pos / media.Dur);
+            mPos.Text = FmtSec(pos);
+            mDur.Text = FmtSec(media.Dur);
+            nProgress.Set(pos / media.Dur);
+            if (stageProgress != null) stageProgress.Set(pos / media.Dur);
+            nPos.Text = FmtSec(pos);
+            nRem.Text = "−" + FmtSec(Math.Max(0, media.Dur - pos));
+            FitTimes(mPos, mDur, mProgress, 36, 258 + 72);
+            FitTimes(nPos, nRem, nProgress, 38, MW - 36);
         }
 
         // ---- громкость в мини-плеере: только этот плеер

@@ -30,6 +30,7 @@ namespace Kapsula
         public byte[] Cover;
         public double Pos, Dur;
         public DateTime PosAt = DateTime.UtcNow;
+        public bool CanSeek;                // плеер умеет перематывать трек в любую точку
 
         public double Now()
         {
@@ -155,6 +156,27 @@ namespace Kapsula
             });
         }
 
+        // Перемотать трек выбранного плеера в точку seconds от начала. Синхронно, ждёт плеер до ~3 с —
+        // звать только не из потока интерфейса. false — трека нет, плеер не умеет перематывать или не принял.
+        public bool Seek(double seconds)
+        {
+            var ses = chosen;
+            if (ses == null) return false;
+            bool ok = false;
+            try
+            {
+                var pb = ses.GetPlaybackInfo();
+                if (pb != null && pb.Controls.IsPlaybackPositionEnabled)
+                {
+                    var tl = ses.GetTimelineProperties();
+                    ok = Wait(ses.TryChangePlaybackPositionAsync(tl.StartTime.Ticks + TimeSpan.FromSeconds(seconds).Ticks));   // позиция считается от начала дорожки
+                }
+            }
+            catch { ok = false; }
+            Hurry();
+            return ok;
+        }
+
         public void Start() { var t = new Thread(Loop); t.IsBackground = true; t.Start(); }
         public void Stop() { stop = true; }
 
@@ -201,6 +223,7 @@ namespace Kapsula
                             info.Artist = p.Artist ?? "";
                             var pb = s.GetPlaybackInfo();
                             info.Playing = pb != null && pb.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                            try { info.CanSeek = pb != null && pb.Controls.IsPlaybackPositionEnabled; } catch { info.CanSeek = false; }
                             try
                             {
                                 var tl = s.GetTimelineProperties();
@@ -260,7 +283,7 @@ namespace Kapsula
                 }
                 catch { mgr = null; }
 
-                string sig = info.Source + "|" + info.Sources.Length + "|" + info.Has + "|" + info.Playing + "|" + info.Title + "|" + info.Artist + "|" + (info.Cover == null ? "" : coverSig ?? "") + "|" + (long)info.Pos + "|" + (long)info.Dur;
+                string sig = info.Source + "|" + info.Sources.Length + "|" + info.Has + "|" + info.Playing + "|" + info.Title + "|" + info.Artist + "|" + (info.Cover == null ? "" : coverSig ?? "") + "|" + (long)info.Pos + "|" + (long)info.Dur + "|" + info.CanSeek;
                 if (sig != sentSig)
                 {
                     sentSig = sig;

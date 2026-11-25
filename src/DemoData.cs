@@ -43,7 +43,7 @@ namespace Kapsula
             if (DemoEdge)
             {
                 // без обложки и исполнителя, а трек — на два часа (время с часами)
-                media = new MediaInfo { Has = true, Playing = true, Title = "Я", Artist = "", Pos = 65, Dur = 7265, PosAt = DateTime.UtcNow };
+                media = new MediaInfo { Has = true, Playing = true, Title = "Я", Artist = "", Pos = 65, Dur = 7265, PosAt = DateTime.UtcNow, CanSeek = true };
                 RenderMedia();
                 var many = new System.Text.StringBuilder();
                 for (int i = 0; i < 70; i++) many.Append("очень много текста ");

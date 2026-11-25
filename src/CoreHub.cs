@@ -146,7 +146,7 @@ namespace Kapsula
             Describe();
             link = new HubLink("kapsula", "kapsula.txt", Updater.CurrentText, TestPort > 0 ? TestPort : HubLink.DefaultPort);
             link.Topics = new string[] { "hub.theme" };
-            link.Commands = new string[] { "settings.set", "show", Family.NotifyCommand, "media.toggle", "media.prev", "media.next" };
+            link.Commands = new string[] { "settings.set", "show", Family.NotifyCommand, "media.toggle", "media.prev", "media.next", "media.seek" };
             link.OnCommand = Command;
             link.OnState = delegate(string topic, object data, string from)
             {
@@ -282,6 +282,17 @@ namespace Kapsula
                 string title = NotifyText(t, 60), text = NotifyText(x, 200), sender = from ?? "";
                 bool open = o is bool && (bool)o && sender.Length > 0;
                 island.Dispatcher.BeginInvoke(new Action(delegate { island.FamilyNotify(sender, title, text, open); }));
+                return null;
+            }
+            if (name == "media.seek")
+            {
+                // { position: секунды от начала трека }. Плеер отвечает до ~3 с — ждём его здесь, в фоновом потоке,
+                // а не в потоке окна. Отказ уходит ответом ok=false с текстом ошибки (HubLink)
+                object v;
+                args.TryGetValue("position", out v);
+                double sec;
+                if (!SeekArg(v, out sec)) throw new Exception("bad position");
+                if (!island.HubSeek(sec)) throw new Exception("unsupported");
                 return null;
             }
             Exception failed = null;
@@ -610,13 +621,30 @@ namespace Kapsula
 
         // Ещё два необязательных поля kapsula.media: album — альбом из сессии Windows (получатель по нему отличает альбомную
         // версию от сингла, когда ищет обложку сам); color — цвет, в который остров красит трек по обложке, "#rrggbb".
-        // Нет — поля нет. state == null (делиться нельзя или трека нет) — так и остаётся null
-        public static Dictionary<string, object> MediaMore(Dictionary<string, object> state, string album, string color)
+        // Нет — поля нет. canSeek — плеер умеет перематывать (команда media.seek); это поле есть всегда.
+        // state == null (делиться нельзя или трека нет) — так и остаётся null
+        public static Dictionary<string, object> MediaMore(Dictionary<string, object> state, string album, string color, bool canSeek)
         {
             if (state == null) return null;
             if (!string.IsNullOrEmpty(album)) state["album"] = album;
             if (!string.IsNullOrEmpty(color)) state["color"] = color;
+            state["canSeek"] = canSeek;
             return state;
+        }
+
+        // Аргумент position команды media.seek: число секунд от начала трека (JavaScriptSerializer даёт int, long,
+        // double или decimal). Не число, NaN или бесконечность — false; меньше нуля — начало трека
+        public static bool SeekArg(object v, out double sec)
+        {
+            sec = 0;
+            if (v is int) sec = (int)v;
+            else if (v is long) sec = (long)v;
+            else if (v is double) sec = (double)v;
+            else if (v is decimal) sec = (double)(decimal)v;
+            else return false;
+            if (double.IsNaN(sec) || double.IsInfinity(sec)) { sec = 0; return false; }
+            if (sec < 0) sec = 0;
+            return true;
         }
 
         public static string Hex(System.Windows.Media.Color c) { return "#" + c.R.ToString("x2") + c.G.ToString("x2") + c.B.ToString("x2"); }
@@ -1048,7 +1076,7 @@ namespace Kapsula
             }
             else hubAnchorKey = null;
             CoreHub.Share("kapsula.media", CoreHub.MediaMore(CoreHub.MediaState(true, true, media.Playing, media.Title, media.Artist, MediaWatcher.DisplayName(media.Source),
-                cover, dur, hubAnchorPos, CoreHub.UnixMs(hubAnchorAt)), media.Album, coverAccent.HasValue ? CoreHub.Hex(coverAccent.Value) : null));
+                cover, dur, hubAnchorPos, CoreHub.UnixMs(hubAnchorAt)), media.Album, coverAccent.HasValue ? CoreHub.Hex(coverAccent.Value) : null, media.CanSeek));
         }
 
         // Текст песни для других приложений. Собранное состояние запоминается по самому списку lyrics (новый текст — новый
@@ -1133,7 +1161,7 @@ namespace Kapsula
                 else
                 {
                     bool first = media.Title == "Ночной маршрут";
-                    media = new MediaInfo { Has = true, Playing = true, Title = first ? "Утренний перегон" : "Ночной маршрут", Artist = first ? "Другой исполнитель" : "Kapsula Demo", Cover = media.Cover, Pos = 0, Dur = 204, PosAt = DateTime.UtcNow };
+                    media = new MediaInfo { Has = true, Playing = true, Title = first ? "Утренний перегон" : "Ночной маршрут", Artist = first ? "Другой исполнитель" : "Kapsula Demo", Cover = media.Cover, Pos = 0, Dur = 204, PosAt = DateTime.UtcNow, CanSeek = true };
                 }
                 RenderMedia();
                 return;
@@ -1147,6 +1175,27 @@ namespace Kapsula
             }
             else if (name == "media.prev") { trackDir = -1; trackDirAt = Environment.TickCount; watcher.Command(0xB1); }
             else if (name == "media.next") { trackDir = 1; trackDirAt = Environment.TickCount; watcher.Command(0xB0); }
+        }
+
+        // Команда media.seek: перемотать в точку sec от начала трека. Зовётся из фонового потока хаба и ждёт плеер там же.
+        // false — трека нет, плеер не умеет перематывать или не принял команду. В демо трек выдуманный — двигается только он
+        public bool HubSeek(double sec)
+        {
+            bool can = false, demo = false; string key = null;
+            Dispatcher.Invoke(new Action(delegate
+            {
+                can = media.Has && media.CanSeek;
+                if (!can) return;
+                if (media.Dur > 0 && sec > media.Dur) sec = media.Dur;
+                key = SeekKey(media);
+                demo = Demo;
+                if (demo) SeekDone(key, sec);
+            }));
+            if (!can) return false;
+            if (demo) return true;
+            if (!watcher.Seek(sec)) return false;
+            Dispatcher.BeginInvoke(new Action(delegate { SeekDone(key, sec); }));
+            return true;
         }
 
         // ---- нагрузка: процессор, память, видеокарта, сеть. Измеряется раз в две секунды и только пока это кому-то видно:

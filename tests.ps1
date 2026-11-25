@@ -826,11 +826,24 @@ T 'хаб: музыка — с длиной и обложкой' (HubJson $mst) 
 T 'хаб: музыка — типы времени' ("$($mst['duration'].GetType().Name) $($mst['position'].GetType().Name) $($mst['positionAt'].GetType().Name)") 'Double Double Int64'
 T 'хаб: музыка — без длины времени нет' (HubJson $ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]-1, [double]5, [long]1795300000000))) '{"playing":true,"title":"А","artist":"Б","app":"В"}'
 T 'хаб: музыка — позиция не дальше длины' (HubJson $ms.Invoke($null, @($true, $true, $true, 'А', '', '', '', [double]200, [double]203.7, [long]1))) '{"playing":true,"title":"А","artist":"","app":"","duration":200,"position":200,"positionAt":1}'
-# альбом и цвет трека — необязательные; null так и остаётся null
+# альбом и цвет трека — необязательные; canSeek — всегда, последним полем; null так и остаётся null
 $mm = $chT.GetMethod('MediaMore')
-T 'хаб: музыка — альбом и цвет' (HubJson $mm.Invoke($null, @($ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]0, [double]0, [long]0)), 'Альбом', '#1a2b3c'))) '{"playing":true,"title":"А","artist":"Б","app":"В","album":"Альбом","color":"#1a2b3c"}'
-T 'хаб: музыка — без альбома и цвета' (HubJson $mm.Invoke($null, @($ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]0, [double]0, [long]0)), '', $null))) '{"playing":true,"title":"А","artist":"Б","app":"В"}'
-T 'хаб: музыка — альбом при запрете не уходит' (HubJson $mm.Invoke($null, @($null, 'Альбом', '#1a2b3c'))) 'null'
+T 'хаб: музыка — альбом и цвет' (HubJson $mm.Invoke($null, @($ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]0, [double]0, [long]0)), 'Альбом', '#1a2b3c', $false))) '{"playing":true,"title":"А","artist":"Б","app":"В","album":"Альбом","color":"#1a2b3c","canSeek":false}'
+T 'хаб: музыка — без альбома и цвета' (HubJson $mm.Invoke($null, @($ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]0, [double]0, [long]0)), '', $null, $false))) '{"playing":true,"title":"А","artist":"Б","app":"В","canSeek":false}'
+T 'хаб: музыка — альбом при запрете не уходит' (HubJson $mm.Invoke($null, @($null, 'Альбом', '#1a2b3c', $true))) 'null'
+T 'хаб: музыка — плеер умеет перематывать' (HubJson $mm.Invoke($null, @($ms.Invoke($null, @($true, $true, $true, 'А', 'Б', 'В', $null, [double]200, [double]10, [long]1)), 'Альбом', $null, $true))) '{"playing":true,"title":"А","artist":"Б","app":"В","duration":200,"position":10,"positionAt":1,"album":"Альбом","canSeek":true}'
+T 'хаб: музыка — плеер не умеет перематывать' (HubJson $mm.Invoke($null, @($ms.Invoke($null, @($true, $true, $false, 'А', 'Б', 'В', $null, [double]200, [double]10, [long]1)), '', $null, $false))) '{"playing":false,"title":"А","artist":"Б","app":"В","duration":200,"position":10,"positionAt":1,"canSeek":false}'
+# media.seek: position — секунды от начала трека; отрицательное — начало; не число — отказ
+$sa = $chT.GetMethod('SeekArg')
+function SeekArgOf($v) { $a = [object[]]@($v, $null); $ok = $sa.Invoke($null, $a); return "$ok $($a[1])" }
+T 'хаб: перемотка — целое число' (SeekArgOf ([int]42)) 'True 42'
+T 'хаб: перемотка — дробное число' (SeekArgOf ([double]12.5)) 'True 12.5'
+T 'хаб: перемотка — decimal' (SeekArgOf ([decimal]7.25)) 'True 7.25'
+T 'хаб: перемотка — меньше нуля — начало' (SeekArgOf ([double]-5)) 'True 0'
+T 'хаб: перемотка — строка' (SeekArgOf '30') 'False 0'
+T 'хаб: перемотка — null' (SeekArgOf $null) 'False 0'
+T 'хаб: перемотка — NaN' (SeekArgOf ([double]::NaN)) 'False 0'
+T 'хаб: перемотка — бесконечность' (SeekArgOf ([double]::PositiveInfinity)) 'False 0'
 T 'хаб: цвет трека — #rrggbb' ($chT.GetMethod('Hex').Invoke($null, @([System.Windows.Media.Color]::FromRgb(10, 171, 255)))) '#0aabff'
 T 'хаб: миллисекунды с 1970 года' ($chT.GetMethod('UnixMs').Invoke($null, @([datetime]::SpecifyKind([datetime]'2026-11-24 10:00:00.250', 'Utc')))) '1795514400250'
 
